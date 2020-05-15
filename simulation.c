@@ -8,10 +8,10 @@
 #include <string.h>
 
 #define E_FIXED_POINT 32
-#define MAX_USER_NUM 3
-#define MAX_DIMENSION 32
+#define MAX_USER_NUM 7
+#define MAX_DIMENSION 512
 #define NUM_THREAD 4
-#define REPEAT 50
+#define REPEAT 5
 
 typedef struct _thread_data_t{
     mpz_t ****x_nu;
@@ -55,7 +55,7 @@ void simpleHash(mpz_t x, time_t y, mpz_t prime_base, mpz_t modulus){ // Our hash
 
 
 
-void generateKeys(mpz_t p_nu[], gmp_randstate_t state){
+void generateKeys(mpz_t p_nu[], gmp_randstate_t state, mpz_t modulus){
     mpz_t s_nu_mu[MAX_USER_NUM][MAX_USER_NUM];
     for(int i = 0; i < MAX_USER_NUM; i++){
         for(int j = 0; j < MAX_USER_NUM; j++){
@@ -84,6 +84,7 @@ void generateKeys(mpz_t p_nu[], gmp_randstate_t state){
             mpz_add(p_nu[i], p_nu[i], p_nu_mu[i][j]);
             mpz_clear(p_nu_mu[i][j]);
         }
+        mpz_mod(p_nu[i], p_nu[i], modulus);
     }
 }
 
@@ -210,14 +211,19 @@ int main(int argc, char **argv){
     gmp_randseed_ui(state, time(NULL));
     
     
-    mpz_t p,q,N,N2;
-    mpz_inits(p,q,N,N2,NULL);
+    mpz_t p,q,N,N2,psub1,qsub1,phiN;
+    mpz_inits(p,q,N,N2,psub1,qsub1,phiN,NULL);
     mpz_urandomb(p, state, 1024);
     mpz_nextprime(p, p);
     mpz_urandomb(q, state, 1024);
     mpz_nextprime(q, q);
+    mpz_sub_ui(psub1, p, 1);
+    mpz_sub_ui(qsub1, q, 1);
     mpz_mul(N, p, q);
     mpz_mul(N2, N, N);
+    mpz_set(phiN, N);
+    mpz_mul(phiN, phiN, psub1);
+    mpz_mul(phiN, phiN, qsub1);
     
     FILE *f;
     char fileName[20];
@@ -247,7 +253,7 @@ int main(int argc, char **argv){
           perror( "clock gettime" );
           return EXIT_FAILURE;
         }
-        generateKeys(p_nu, state);
+        generateKeys(p_nu, state, phiN);
         if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) {
           perror( "clock gettime" );
           return EXIT_FAILURE;
