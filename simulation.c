@@ -3,15 +3,18 @@
 #include <unistd.h>
 #include <time.h>
 #include <math.h>
+#include <tgmath.h>
 #include <gmp.h>
 #include <pthread.h>
 #include <string.h>
 
-#define E_FIXED_POINT 32
-#define MAX_USER_NUM 7
-#define MAX_DIMENSION 512
-#define NUM_THREAD 4
-#define REPEAT 5
+
+int E_FIXED_POINT = 32;
+int MAX_USER_NUM;
+int MAX_DIMENSION;
+int NUM_THREAD = 4;
+int REPEAT = 50;
+
 
 typedef struct _thread_data_t{
     mpz_t ****x_nu;
@@ -34,7 +37,6 @@ void encode(mpz_t x, double y){
 }
 
 void decode(double *x, mpz_t y){
-    
     mpf_set_default_prec(E_FIXED_POINT + 32);
     mpf_t temp;
     mpf_init(temp);
@@ -64,7 +66,7 @@ void generateKeys(mpz_t p_nu[], gmp_randstate_t state, mpz_t modulus){
                 mpz_set_ui(s_nu_mu[i][j], 0);
                 continue;
             }
-            mpz_urandomb(s_nu_mu[i][j], state, 1000);
+            mpz_urandomb(s_nu_mu[i][j], state, 118);
         }
     }
     
@@ -84,7 +86,7 @@ void generateKeys(mpz_t p_nu[], gmp_randstate_t state, mpz_t modulus){
             mpz_add(p_nu[i], p_nu[i], p_nu_mu[i][j]);
             mpz_clear(p_nu_mu[i][j]);
         }
-        mpz_mod(p_nu[i], p_nu[i], modulus);
+        //mpz_mod(p_nu[i], p_nu[i], modulus);
     }
 }
 
@@ -162,7 +164,6 @@ void *aggregate_thread(void *arg){
             mpz_sub_ui(temp, temp, 1);
             mpz_tdiv_q(temp, temp, data->N);
             decode(&((*(data->aggregate_gradient))[j][k]), temp);
-            
         }
         //printf("(agg) j:%d\n", j);
     }
@@ -185,6 +186,13 @@ int main(int argc, char **argv){
     int user_num[4] = {3, 5, 7, MAX_USER_NUM};
     int dimension[5] = {32, 64, 128, 256, MAX_DIMENSION};
  */
+    
+    
+    if(argc != 3) printf("Syntax error: two arguments need to be provided: # of users and dimension.\n");
+    MAX_USER_NUM = atoi(argv[1]);
+    MAX_DIMENSION = atoi(argv[2]);
+    
+    
     srand (time ( NULL));
     
     double** aggregate_gradient = (double**)malloc(MAX_DIMENSION * sizeof(double*));
@@ -211,8 +219,8 @@ int main(int argc, char **argv){
     gmp_randseed_ui(state, time(NULL));
     
     
-    mpz_t p,q,N,N2,psub1,qsub1,phiN;
-    mpz_inits(p,q,N,N2,psub1,qsub1,phiN,NULL);
+    mpz_t p,q,N,N2,psub1,qsub1,phiN2;
+    mpz_inits(p,q,N,N2,psub1,qsub1,phiN2,NULL);
     mpz_urandomb(p, state, 1024);
     mpz_nextprime(p, p);
     mpz_urandomb(q, state, 1024);
@@ -221,9 +229,9 @@ int main(int argc, char **argv){
     mpz_sub_ui(qsub1, q, 1);
     mpz_mul(N, p, q);
     mpz_mul(N2, N, N);
-    mpz_set(phiN, N);
-    mpz_mul(phiN, phiN, psub1);
-    mpz_mul(phiN, phiN, qsub1);
+    mpz_set(phiN2, N);
+    mpz_mul(phiN2, phiN2, psub1);
+    mpz_mul(phiN2, phiN2, qsub1);
     
     FILE *f;
     char fileName[20];
@@ -239,27 +247,27 @@ int main(int argc, char **argv){
     
     struct timespec start, stop;
     
-    double recordedTime[REPEAT];
-    double sum = 0;
-    double mean, stddev, min, max, var;
+    long double recordedTime[REPEAT];
+    long double sum = 0.0;
+    long double mean, stddev, min, max, var;
     
     mpz_t *p_nu = (mpz_t*)malloc(MAX_USER_NUM * sizeof(mpz_t));
     
     // single-threaded keygen.
     
     for(int count = 0; count < REPEAT; count++){
-        printf("(gen) count: %d\n", count);
+        printf("(gen, user#: %d, dim: %d) count: %d\n", MAX_USER_NUM, MAX_DIMENSION, count);
         if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) {
           perror( "clock gettime" );
           return EXIT_FAILURE;
         }
-        generateKeys(p_nu, state, phiN);
+        generateKeys(p_nu, state, N);
         if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) {
           perror( "clock gettime" );
           return EXIT_FAILURE;
         }
-        recordedTime[count] = (stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
-        / ((double)(1e9) * MAX_USER_NUM);
+        recordedTime[count] = (stop.tv_sec - start.tv_sec) + (long double)( stop.tv_nsec - start.tv_nsec)
+        / ((long double)(1e9) * MAX_USER_NUM);
     }
     
     min = recordedTime[0];
@@ -270,14 +278,15 @@ int main(int argc, char **argv){
         if (max < recordedTime[count]) max = recordedTime[count];
     }
     mean = sum / REPEAT;
-    sum = 0;
+    sum = 0.0;
     for(int count = 0; count < REPEAT; count++){
-        sum += pow(recordedTime[count] - mean, 2);
+        sum += (recordedTime[count] - mean) * (recordedTime[count] - mean);
     }
-    var = sum / REPEAT;
-    stddev = sqrt(stddev);
     
-    fprintf(f, "(KeyGen) mean: %f, std: %f, max:%f, min:%f\n",  mean, stddev, max, min);
+    var = sum / REPEAT;
+    stddev = sqrtl(var);
+    
+    fprintf(f, "(KeyGen) mean: %Lf, std: %Lf, max:%Lf, min:%Lf\n",  mean, stddev, max, min);
     
     fflush(f);
     
@@ -332,7 +341,7 @@ int main(int argc, char **argv){
     
     
     for(int count = 0; count < REPEAT; count++){
-        printf("(enc) count: %d\n", count);
+        printf("(enc, user#: %d, dim: %d) count: %d\n", MAX_USER_NUM, MAX_DIMENSION, count);
         if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) {
           perror( "clock gettime" );
           return EXIT_FAILURE;
@@ -352,8 +361,8 @@ int main(int argc, char **argv){
           perror( "clock gettime" );
           return EXIT_FAILURE;
         }
-        recordedTime[count] = (stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
-        / ((double)(1e9) * MAX_USER_NUM);
+        recordedTime[count] = (stop.tv_sec - start.tv_sec) + (long double)( stop.tv_nsec - start.tv_nsec)
+        / ((long double)(1e9) * MAX_USER_NUM);
     }
     
     
@@ -366,20 +375,23 @@ int main(int argc, char **argv){
         if (max < recordedTime[count]) max = recordedTime[count];
     }
     mean = sum / REPEAT;
-    sum = 0;
+    sum = 0.0;
     for(int count = 0; count < REPEAT; count++){
-        sum += pow(recordedTime[count] - mean, 2);
+        sum += (recordedTime[count] - mean) * (recordedTime[count] - mean);
     }
     var = sum / REPEAT;
-    stddev = sqrt(stddev);
+    stddev = sqrtl(var);
     
-    fprintf(f, "(Encryption) mean: %f, std: %f, max:%f, min:%f\n", mean, stddev, max, min);
+    fprintf(f, "(Encryption) mean: %Lf, std: %Lf, max:%Lf, min:%Lf\n", mean, stddev, max, min);
     
 
     
     fflush(f);
-
+/*
+    fclose(f);
     
+    return EXIT_SUCCESS;
+  */
     
     
 
@@ -388,7 +400,7 @@ int main(int argc, char **argv){
     // Simulation of multi-threaded aggregation
     
     for(int count = 0; count < REPEAT; count++){
-        printf("(agg) count: %d\n", count);
+        printf("(agg, user#: %d, dim: %d) count: %d\n", MAX_USER_NUM, MAX_DIMENSION, count);
         if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) {
           perror( "clock gettime" );
           return EXIT_FAILURE;
@@ -407,8 +419,8 @@ int main(int argc, char **argv){
           perror( "clock gettime" );
           return EXIT_FAILURE;
         }
-        recordedTime[count] =(stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
-        / (double)(1e9);
+        recordedTime[count] =(stop.tv_sec - start.tv_sec) + (long double)( stop.tv_nsec - start.tv_nsec)
+        / (long double)(1e9);
     }
     
     
@@ -420,14 +432,14 @@ int main(int argc, char **argv){
         if (max < recordedTime[count]) max = recordedTime[count];
     }
     mean = sum / REPEAT;
-    sum = 0;
+    sum = 0.0;
     for(int count = 0; count < REPEAT; count++){
-        sum += pow(recordedTime[count] - mean, 2);
+        sum += (recordedTime[count] - mean) * (recordedTime[count] - mean);
     }
     var = sum / REPEAT;
-    stddev = sqrt(stddev);
+    stddev = sqrtl(var);
     
-    fprintf(f, "(Aggregation) mean: %f, std: %f, max:%f, min:%f\n",  mean, stddev, max, min);
+    fprintf(f, "(Aggregation) mean: %Lf, std: %Lf, max:%Lf, min:%Lf\n",  mean, stddev, max, min);
     
     fflush(f);
     
@@ -439,7 +451,7 @@ int main(int argc, char **argv){
 
 	gmp_randclear(state);
  
-    mpz_clears(p,q,N,N2,NULL);
+    mpz_clears(p,q,N,N2,psub1,qsub1,phiN2,NULL);
     mpz_clear(prime_base);
     
     
