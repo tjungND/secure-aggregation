@@ -219,9 +219,63 @@ int main(int argc, char **argv){
     mpz_mul(N, p, q);
     mpz_mul(N2, N, N);
     
+    FILE *f;
+    char fileName[20];
+    strcpy(fileName, "result.txt");
+    
+    
+    
+    f = fopen(fileName, "a");
+    fprintf(f, "\n# of user: %d, dimension: %d, # of threads:%d, # of repetition: %d\n", MAX_USER_NUM, MAX_DIMENSION, NUM_THREAD, REPEAT);
+
+    
+    fflush(f);
+    
+    struct timespec start, stop;
+    
+    double recordedTime[REPEAT];
+    double sum = 0;
+    double mean, stddev, min, max, var;
     
     mpz_t *p_nu = (mpz_t*)malloc(MAX_USER_NUM * sizeof(mpz_t));
-    generateKeys(p_nu, state);
+    
+    // single-threaded keygen.
+    
+    for(int count = 0; count < REPEAT; count++){
+        printf("(gen) count: %d\n", count);
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) {
+          perror( "clock gettime" );
+          return EXIT_FAILURE;
+        }
+        generateKeys(p_nu, state);
+        if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) {
+          perror( "clock gettime" );
+          return EXIT_FAILURE;
+        }
+        recordedTime[count] = (stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
+        / ((double)(1e9) * MAX_USER_NUM);
+    }
+    
+    min = recordedTime[0];
+    max = recordedTime[0];
+    for(int count = 0; count < REPEAT; count++){
+        sum += recordedTime[count];
+        if (min > recordedTime[count]) min = recordedTime[count];
+        if (max < recordedTime[count]) max = recordedTime[count];
+    }
+    mean = sum / REPEAT;
+    sum = 0;
+    for(int count = 0; count < REPEAT; count++){
+        sum += pow(recordedTime[count] - mean, 2);
+    }
+    var = sum / REPEAT;
+    stddev = sqrt(stddev);
+    
+    fprintf(f, "(KeyGen) mean: %f, std: %f, max:%f, min:%f\n",  mean, stddev, max, min);
+    
+    fflush(f);
+    
+    
     
     //mpz_t x_nu[MAX_USER_NUM][MAX_DIMENSION][MAX_DIMENSION];
     mpz_t*** x_nu;
@@ -265,29 +319,11 @@ int main(int argc, char **argv){
     }
     
     
-    FILE *f;
-    char fileName[20];
-    strcpy(fileName, "result.txt");
-    
-    puts(fileName);
-    
-    
-    f = fopen(fileName, "a");
-    fprintf(f, "# of user: %d, dimension: %d, # of threads:%d, # of repetition: %d\n", MAX_USER_NUM, MAX_DIMENSION, NUM_THREAD, REPEAT);
-
-    
-    fflush(f);
-    
     
     
     // Simulation of multi-threaded encryption
     
-    struct timespec start, stop;
     
-    
-
-    
-    double recordedTime[REPEAT];
     
     for(int count = 0; count < REPEAT; count++){
         printf("(enc) count: %d\n", count);
@@ -311,12 +347,11 @@ int main(int argc, char **argv){
           return EXIT_FAILURE;
         }
         recordedTime[count] = (stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
-        / (double)(1e9);
+        / ((double)(1e9) * MAX_USER_NUM);
     }
     
     
-    double sum = 0;
-    double mean, stddev, min, max, var;
+    
     min = recordedTime[0];
     max = recordedTime[0];
     for(int count = 0; count < REPEAT; count++){
