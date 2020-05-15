@@ -11,7 +11,7 @@
 #define MAX_USER_NUM 3
 #define MAX_DIMENSION 32
 #define NUM_THREAD 4
-#define REPEAT 100
+#define REPEAT 50
 
 typedef struct _thread_data_t{
     mpz_t ****x_nu;
@@ -210,8 +210,8 @@ int main(int argc, char **argv){
     gmp_randseed_ui(state, time(NULL));
     
     
-    mpz_t p,q,N,N2,p_inverse_mod_q,q_inverse_mod_p;
-    mpz_inits(p,q,N,N2,p_inverse_mod_q,q_inverse_mod_p,NULL);
+    mpz_t p,q,N,N2;
+    mpz_inits(p,q,N,N2,NULL);
     mpz_urandomb(p, state, 1024);
     mpz_nextprime(p, p);
     mpz_urandomb(q, state, 1024);
@@ -272,8 +272,8 @@ int main(int argc, char **argv){
     puts(fileName);
     
     
-    f = fopen(fileName, "w");
-    fprintf(f, "# of user: %d, dimension: %d, # of threads:%d\n", MAX_USER_NUM, MAX_DIMENSION, NUM_THREAD);
+    f = fopen(fileName, "a");
+    fprintf(f, "# of user: %d, dimension: %d, # of threads:%d, # of repetition: %d\n", MAX_USER_NUM, MAX_DIMENSION, NUM_THREAD, REPEAT);
 
     
     fflush(f);
@@ -398,11 +398,13 @@ int main(int argc, char **argv){
 
 	gmp_randclear(state);
  
-    mpz_clears(p,q,N,N2,p_inverse_mod_q,q_inverse_mod_p,NULL);
+    mpz_clears(p,q,N,N2,NULL);
     mpz_clear(prime_base);
     
+    
+    
     for(int i = 0; i < NUM_THREAD; i++){
-        mpz_clears(thread_data[i].N, thread_data[i].N2, thread_data[i].prime_base);
+        mpz_clears(thread_data[i].N, thread_data[i].N2, thread_data[i].prime_base,NULL);
     }
     
     
