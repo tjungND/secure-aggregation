@@ -1,12 +1,30 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <time.h>
 #include <math.h>
 #include <gmp.h>
+#include <pthread.h>
+#include <string.h>
 
 #define E_FIXED_POINT 32
-#define MAX_USER_NUM 10
-#define MAX_DIMENSION 512
+#define MAX_USER_NUM 3
+#define MAX_DIMENSION 32
+#define NUM_THREAD 4
+#define REPEAT 100
+
+typedef struct _thread_data_t{
+    mpz_t ****x_nu;
+    mpz_t ****y_nu;
+    double ***aggregate_gradient;
+    double ****user_gradient;
+    mpz_t **p_nu;
+    mpz_t N;
+    mpz_t N2;
+    mpz_t prime_base;
+    time_t current_time;
+    int pid;
+} thread_data_t;
 
 
 void encode(mpz_t x, double y){
@@ -31,6 +49,8 @@ void simpleHash(mpz_t x, time_t y, mpz_t prime_base, mpz_t modulus){ // Our hash
     
     mpz_mul_ui(x, prime_base, y);
     mpz_mod(x, x, modulus);
+    
+    
 }
 
 
@@ -96,18 +116,80 @@ void clear3Darray(mpz_t ****arr){
     free(*arr);
 }
 
+void *encrypt_thread(void *arg){
+    
+    thread_data_t *data = (thread_data_t *)arg;
+
+    mpz_t temp;
+    mpz_init(temp);
+    
+    for(int i = 0; i < MAX_USER_NUM; i++){
+        for(int j = 0; j < MAX_DIMENSION; j++){
+            for(int k = MAX_DIMENSION * (data->pid) / NUM_THREAD; k < MAX_DIMENSION * (data->pid + 1) / NUM_THREAD; k++){
+                //printf("%d,%d,%d\n", i, j, k);
+                encode((*(data->x_nu))[i][j][k], (*(data->user_gradient))[i][j][k]);
+                mpz_mul(temp, data->N, (*(data->x_nu))[i][j][k]);
+                mpz_add_ui((*(data->y_nu))[i][j][k], temp, 1);
+                simpleHash(temp, data->current_time, data->prime_base, data->N); // temp = H(t)
+                mpz_powm(temp, temp, (*(data->p_nu))[i], data->N); // temp = H(t)^{p_nu[i]} mod N^2
+                mpz_mul((*(data->y_nu))[i][j][k], (*(data->y_nu))[i][j][k], temp);
+                mpz_mod((*(data->y_nu))[i][j][k], (*(data->y_nu))[i][j][k], data->N2); // y_nu[i][j][k] = final ciphertext to be broadcast
+            }
+            //printf("(enc) i:%d, j:%d\n", i, j);
+        }
+    }
+    mpz_clear(temp);
+    
+    pthread_exit(NULL);
+}
+
+
+void *aggregate_thread(void *arg){
+    thread_data_t *data = (thread_data_t *)arg;
+
+    mpz_t temp;
+    mpz_init(temp);
+    
+    
+    for(int j = 0; j< MAX_DIMENSION; j++){
+        for(int k = MAX_DIMENSION * (data->pid) / NUM_THREAD; k < MAX_DIMENSION * (data->pid + 1) / NUM_THREAD; k++){
+            for(int i = 0; i < MAX_USER_NUM; i++){
+                mpz_set_ui(temp, 1);
+                mpz_mul(temp, temp, (*(data->y_nu))[i][j][k]);
+            }
+            mpz_mod(temp, temp, data->N2);
+            mpz_sub_ui(temp, temp, 1);
+            mpz_tdiv_q(temp, temp, data->N);
+            decode(&((*(data->aggregate_gradient))[j][k]), temp);
+            
+        }
+        //printf("(agg) j:%d\n", j);
+    }
+    
+    
+    
+    
+    mpz_clear(temp);
+    
+    pthread_exit(NULL);
+    
+}
+
 
 int main(int argc, char **argv){
     
     // This program uses a single machine to simulate multi-user secure aggregation
     
-
-    int user_num[4] = {1, 2, 5, MAX_USER_NUM};
+/*
+    int user_num[4] = {3, 5, 7, MAX_USER_NUM};
     int dimension[5] = {32, 64, 128, 256, MAX_DIMENSION};
-    
+ */
     srand (time ( NULL));
     
-    double aggregate_gradient[MAX_DIMENSION][MAX_DIMENSION] = {0};
+    double** aggregate_gradient = (double**)malloc(MAX_DIMENSION * sizeof(double*));
+    for(int i = 0; i < MAX_DIMENSION; i++){
+        aggregate_gradient[i] = (double*)malloc(MAX_DIMENSION * sizeof(double));
+    }
     
     //double user_gradient[MAX_USER_NUM][MAX_DIMENSION][MAX_DIMENSION];
     double*** user_gradient;
@@ -134,13 +216,11 @@ int main(int argc, char **argv){
     mpz_nextprime(p, p);
     mpz_urandomb(q, state, 1024);
     mpz_nextprime(q, q);
-    mpz_invert(p_inverse_mod_q, p, q);
-    mpz_invert(q_inverse_mod_p, q, p);
     mpz_mul(N, p, q);
     mpz_mul(N2, N, N);
     
     
-    mpz_t p_nu[MAX_USER_NUM];
+    mpz_t *p_nu = (mpz_t*)malloc(MAX_USER_NUM * sizeof(mpz_t));
     generateKeys(p_nu, state);
     
     //mpz_t x_nu[MAX_USER_NUM][MAX_DIMENSION][MAX_DIMENSION];
@@ -164,111 +244,152 @@ int main(int argc, char **argv){
     time_t current_time = time(NULL);
     mpz_t temp;
     mpz_init(temp);
-    for(int i = 0; i < MAX_USER_NUM; i++){
-        for(int j = 0; j < MAX_DIMENSION; j++){
-            for(int k = 0; k < MAX_DIMENSION; k++){
-                printf("%d,%d,%d\n", i, j, k);
-                encode(x_nu[i][j][k], user_gradient[i][j][k]);
-                mpz_mul(temp, N, x_nu[i][j][k]);
-                mpz_add_ui(y_nu[i][j][k], temp, 1);
-                // y_nu[i][j][k] = (1+N)^{x_nu[i][j][k]}
-                simpleHash(temp, current_time, prime_base, N); // temp = H(t)
-                //mpz_powm(temp, temp, p_nu[i], N); // temp = H(t)^{p_nu[i]} mod N^2
-                mpz_mul(y_nu[i][j][k], y_nu[i][j][k], temp);
-                mpz_mod(y_nu[i][j][k], y_nu[i][j][k], N2); // y_nu[i][j][k] = final ciphertext to be broadcast
-                
-            }
-        }
+    
+    
+    pthread_t threads[NUM_THREAD];
+    
+    thread_data_t thread_data[NUM_THREAD];
+    
+    for(int i = 0; i < NUM_THREAD; i++){
+        thread_data[i].pid = i;
+        thread_data[i].x_nu = &x_nu;
+        thread_data[i].aggregate_gradient = &aggregate_gradient;
+        thread_data[i].user_gradient = &user_gradient;
+        thread_data[i].y_nu = &y_nu;
+        thread_data[i].p_nu = &p_nu;
+        thread_data[i].current_time = current_time;
+        mpz_inits(thread_data[i].N, thread_data[i].N2, thread_data[i].prime_base, NULL);
+        mpz_set(thread_data[i].N, N);
+        mpz_set(thread_data[i].N2, N2);
+        mpz_set(thread_data[i].prime_base, prime_base);
     }
     
-    
-    // the following portion simulates the aggregation at the parameter server side, who computes sum of user_gradients for each weight.
-    
-    clock_t begin, end;
-    double time_spent;
-    
-    begin = clock();
-    for(int j = 0; j< MAX_DIMENSION; j++){
-        for(int k = 0; k < MAX_DIMENSION; k++){
-            //printf("%d,%d\n", j, k);
-            for(int i = 0; i < MAX_USER_NUM; i++){
-                mpz_set_ui(temp, 1);
-                mpz_mul(temp, temp, y_nu[i][j][k]);
-            }
-            mpz_mod(temp, temp, N2);
-            mpz_sub_ui(temp, temp, 1);
-            mpz_tdiv_q(temp, temp, N);
-            decode(&(aggregate_gradient[j][k]), temp);
-            
-        }
-    }
-    end = clock();
-    
-    time_spent = (double)(end - begin) / (CLOCKS_PER_SEC);
-
-    printf("Total time: %f\n", time_spent * 1000);
-    
-    mpz_clear(temp);
-
-    return 0;
-
-
-
     
     FILE *f;
-	f = fopen("simulation.csv", "w");
-	fprintf(f, "num,user1,user2,others,aggregator\n");
+    char fileName[20];
+    strcpy(fileName, "result.txt");
+    
+    puts(fileName);
+    
+    
+    f = fopen(fileName, "w");
+    fprintf(f, "# of user: %d, dimension: %d, # of threads:%d\n", MAX_USER_NUM, MAX_DIMENSION, NUM_THREAD);
 
-    //clock_t begin, end;
-    //double time_spent;
+    
+    fflush(f);
+    
+    
+    
+    // Simulation of multi-threaded encryption
+    
+    struct timespec start, stop;
+    
+    
 
-	for(int i = 1; i <= 100; i++){
-	
-		begin = clock();
-
-		
-
-		end = clock();
-
-
-		time_spent = (double)(end - begin) / (CLOCKS_PER_SEC);
-
-		fprintf(f, "%d,%f,", i, time_spent * 1000);
-
-		begin = clock();
-		
+    
+    double recordedTime[REPEAT];
+    
+    for(int count = 0; count < REPEAT; count++){
+        printf("(enc) count: %d\n", count);
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) {
+          perror( "clock gettime" );
+          return EXIT_FAILURE;
+        }
+        for(int i = 0; i < NUM_THREAD; i++){
+            int rc;
+            if((rc = pthread_create(&(threads[i]), NULL, encrypt_thread, &thread_data[i]))){
+                printf("error: pthread_create, rc: %d\n", rc);
+                return EXIT_FAILURE;
+            }
+        }
         
+        for(int i = 0; i < NUM_THREAD; i++){
+            pthread_join(threads[i], NULL);
+        }
+        if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) {
+          perror( "clock gettime" );
+          return EXIT_FAILURE;
+        }
+        recordedTime[count] = (stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
+        / (double)(1e9);
+    }
+    
+    
+    double sum = 0;
+    double mean, stddev, min, max, var;
+    min = recordedTime[0];
+    max = recordedTime[0];
+    for(int count = 0; count < REPEAT; count++){
+        sum += recordedTime[count];
+        if (min > recordedTime[count]) min = recordedTime[count];
+        if (max < recordedTime[count]) max = recordedTime[count];
+    }
+    mean = sum / REPEAT;
+    sum = 0;
+    for(int count = 0; count < REPEAT; count++){
+        sum += pow(recordedTime[count] - mean, 2);
+    }
+    var = sum / REPEAT;
+    stddev = sqrt(stddev);
+    
+    fprintf(f, "(Encryption) mean: %f, std: %f, max:%f, min:%f\n", mean, stddev, max, min);
+    
 
-		end = clock();
+    
+    fflush(f);
 
-		time_spent = (double)(end - begin) / (CLOCKS_PER_SEC);
+    
+    
+    
 
-		
-		fprintf(f, "%f,", time_spent * 1000);
-
-		begin = clock();
-		
-        
-
-		end = clock();
-		time_spent = (double)(end - begin) / (CLOCKS_PER_SEC);
-
-		fprintf(f, "%f,", time_spent * 1000);
-		
-		
-		begin = clock();
-		
-		
-        
-		
-		end = clock();
-		
-		time_spent = (double)(end - begin) / (CLOCKS_PER_SEC);
-		
-		fprintf(f, "%f\n", time_spent * 1000);
-
-		fflush(f);	
-	}
+    
+    
+    // Simulation of multi-threaded aggregation
+    
+    for(int count = 0; count < REPEAT; count++){
+        printf("(agg) count: %d\n", count);
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) {
+          perror( "clock gettime" );
+          return EXIT_FAILURE;
+        }
+        for(int i = 0; i < NUM_THREAD; i++){
+            int rc;
+            if((rc = pthread_create(&(threads[i]), NULL, aggregate_thread, &thread_data[i]))){
+                printf("error: pthread_create, rc: %d\n", rc);
+                return EXIT_FAILURE;
+            }
+        }
+        for(int i = 0; i < NUM_THREAD; i++){
+            pthread_join(threads[i], NULL);
+        }
+        if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) {
+          perror( "clock gettime" );
+          return EXIT_FAILURE;
+        }
+        recordedTime[count] =(stop.tv_sec - start.tv_sec) + (double)( stop.tv_nsec - start.tv_nsec)
+        / (double)(1e9);
+    }
+    
+    
+    min = recordedTime[0];
+    max = recordedTime[0];
+    for(int count = 0; count < REPEAT; count++){
+        sum += recordedTime[count];
+        if (min > recordedTime[count]) min = recordedTime[count];
+        if (max < recordedTime[count]) max = recordedTime[count];
+    }
+    mean = sum / REPEAT;
+    sum = 0;
+    for(int count = 0; count < REPEAT; count++){
+        sum += pow(recordedTime[count] - mean, 2);
+    }
+    var = sum / REPEAT;
+    stddev = sqrt(stddev);
+    
+    fprintf(f, "(Aggregation) mean: %f, std: %f, max:%f, min:%f\n",  mean, stddev, max, min);
+    
+    fflush(f);
+    
 
 	fclose(f);
 	
@@ -280,6 +401,16 @@ int main(int argc, char **argv){
     mpz_clears(p,q,N,N2,p_inverse_mod_q,q_inverse_mod_p,NULL);
     mpz_clear(prime_base);
     
+    for(int i = 0; i < NUM_THREAD; i++){
+        mpz_clears(thread_data[i].N, thread_data[i].N2, thread_data[i].prime_base);
+    }
+    
+    
+    for(int i = 0; i < MAX_DIMENSION; i++){
+        free(aggregate_gradient[i]);
+    }
+    free(aggregate_gradient);
+    
     for(int i = 0; i < MAX_USER_NUM; i++){
         for(int j = 0; j < MAX_DIMENSION; j++){
             free(user_gradient[i][j]);
@@ -288,13 +419,14 @@ int main(int argc, char **argv){
     }
     free(user_gradient);
     
+    free(p_nu);
     
     
     clear3Darray(&x_nu);
     clear3Darray(&y_nu);
 
     
-    return 0;
+    return EXIT_SUCCESS;
  
 }
 
