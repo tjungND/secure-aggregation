@@ -13,7 +13,7 @@ int E_FIXED_POINT = 32;
 int MAX_USER_NUM;
 int MAX_DIMENSION;
 int NUM_THREAD = 4;
-int REPEAT = 50;
+int REPEAT = 10;
 
 
 typedef struct _thread_data_t{
@@ -272,6 +272,7 @@ int main(int argc, char **argv){
     
     min = recordedTime[0];
     max = recordedTime[0];
+    sum = 0.0;
     for(int count = 0; count < REPEAT; count++){
         sum += recordedTime[count];
         if (min > recordedTime[count]) min = recordedTime[count];
@@ -369,6 +370,7 @@ int main(int argc, char **argv){
     
     min = recordedTime[0];
     max = recordedTime[0];
+    sum = 0.0;
     for(int count = 0; count < REPEAT; count++){
         sum += recordedTime[count];
         if (min > recordedTime[count]) min = recordedTime[count];
@@ -426,6 +428,7 @@ int main(int argc, char **argv){
     
     min = recordedTime[0];
     max = recordedTime[0];
+    sum = 0.0;
     for(int count = 0; count < REPEAT; count++){
         sum += recordedTime[count];
         if (min > recordedTime[count]) min = recordedTime[count];
