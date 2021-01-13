@@ -475,8 +475,8 @@ int main(int argc, char **argv){
         }
         free(user_gradient[i]);
     }
-    free(user_gradient);
     
+    free(user_gradient);
     free(p_nu);
     
     
